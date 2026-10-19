@@ -1,0 +1,85 @@
+# 持续集成：把「不需要开程序、不需要浏览器」的自检全跑一遍。
+#
+# 为什么只跑这一批：剩下的门要「程序在跑 + 无界面 Chrome」（verify_desktop.js / verify_shell.js /
+# verify_actions.py / test_desktop.py / test_desktop_exit.py），在 CI 里要先让 Chrome 路径可探测，
+# 属于还没做完的事 —— 宁可少跑、也不让它们变成"永远红着没人看"的装饰。
+#
+# 本地怎么跑同一批：见 README 的「自检」一节。
+name: ci
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+# 默认不给任何权限；下面按 job 需要单独给。
+permissions: {}
+
+jobs:
+  checks:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      # Action 固定到完整 commit SHA（不是 tag）：tag 可以被人重新指向，SHA 不能。
+      # 升级时同时改注释里的版本号，方便人看。
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b  # v5.3.0
+        with:
+          python-version: "3.12"
+
+      # 仓库里绝不该有用户数据。这一条比任何自检都优先：万一有人 commit 了 data/，直接红。
+      - name: 仓库里不许有用户数据
+        shell: pwsh
+        run: |
+          $bad = @()
+          foreach ($p in @("app/data", "app/logs", "app/webview_profile", "app/browser_profile",
+                           "app/个人画像.json", "app/config.json")) {
+            if (Test-Path $p) { $bad += $p }
+          }
+          if (git ls-files | Select-String -Pattern '(^|/)(applications\.db|change_log\.jsonl)$') { $bad += "库/审计文件被 git 跟踪了" }
+          if ($bad.Count -gt 0) { Write-Host "FAIL：$($bad -join '、')"; exit 1 }
+          Write-Host "OK：仓库里没有用户数据"
+
+      - name: 语法（全部 Python 文件编译一遍）
+        shell: pwsh
+        run: |
+          python -m compileall -q app tools
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: 架构依赖方向
+        run: python tools/test_architecture.py
+      - name: core 纯函数
+        run: python tools/test_core.py
+      - name: 数据库结构 / 老库升级
+        run: python tools/test_schema.py
+      - name: 数据库访问层
+        run: python tools/test_store.py
+      - name: 启动备份
+        run: python tools/test_backup.py
+      - name: 数据红线（静态）
+        run: python tools/test_data_safety.py
+      - name: 窗口 / DPI
+        run: python tools/test_window_state.py
+      - name: 桌面快捷方式
+        run: python tools/test_shortcut.py
+      - name: 诊断报告
+        run: python tools/test_diagnostics.py
+      - name: 简历域
+        run: python tools/test_resume.py
+      - name: 简历导出 PPTX
+        run: python tools/test_resume_pptx.py
+      - name: 简历证件照
+        run: python tools/test_resume_photo.py
+      - name: HTTP 路由（自己起隔离副本）
+        run: python tools/test_routes.py
+
+      - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af  # v4.1.0
+        with:
+          node-version: "20"
+      - name: 前端纯函数
+        run: node tools/test_web_lib.js

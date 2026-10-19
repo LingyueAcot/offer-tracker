@@ -1,0 +1,53 @@
+@echo off
+rem ============================================================
+rem  Resume Tracker - ONE-CLICK UPGRADE. Just double-click it.
+rem  1. it unpacks the new version out of this very file
+rem  2. it finds your installed program folder by itself
+rem  3. it replaces only the program files; data\ logs\ config.json
+rem     and startup-log.txt are never touched
+rem  Keep this file ASCII only: Chinese text breaks cmd.exe.
+rem ============================================================
+setlocal
+title Resume Tracker - one-click upgrade
+set "SELF=%~f0"
+set "WORK=%TEMP%\resume-tracker-upgrade"
+set "ZIP=%TEMP%\resume-tracker-upgrade.zip"
+
+if exist "%WORK%" rmdir /s /q "%WORK%" >nul 2>nul
+mkdir "%WORK%" >nul 2>nul
+
+echo.
+echo  Resume Tracker - one-click upgrade
+echo  ------------------------------------------------
+echo  [1/3] unpacking the new version from this file ...
+copy /b "%SELF%" "%ZIP%" >nul
+where tar >nul 2>nul
+if not errorlevel 1 tar -xf "%ZIP%" -C "%WORK%" >nul 2>nul
+if not exist "%WORK%\launcher.py" (
+  echo        tar did not work, trying PowerShell ...
+  powershell -NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -LiteralPath '%ZIP%' -DestinationPath '%WORK%' -Force" >nul 2>nul
+)
+if not exist "%WORK%\launcher.py" goto unpackfail
+if not exist "%WORK%\one-click-upgrade.ps1" goto unpackfail
+
+echo  [2/3] looking for your program and upgrading it ...
+powershell -NoProfile -ExecutionPolicy Bypass -File "%WORK%\one-click-upgrade.ps1" %*
+set "RC=%errorlevel%"
+
+echo.
+echo  [3/3] cleaning up ...
+rmdir /s /q "%WORK%" >nul 2>nul
+del "%ZIP%" >nul 2>nul
+if not "%RC%"=="0" (
+  echo.
+  echo  [!] The upgrade did not finish. Nothing was changed.
+  pause >nul
+)
+exit /b %RC%
+
+:unpackfail
+echo.
+echo  [!] Could not unpack this file - please download it again
+echo      ^(a partial download or a tool that modified it^).
+pause >nul
+exit /b 1
