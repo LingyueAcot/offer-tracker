@@ -27,6 +27,11 @@ import unicodedata
 
 ASSET_ZIP_PREFIX = "offer-tracker-portable-"
 CHECKSUM_ASSET_NAME = "release-SHA256SUMS.txt"
+# ⚠️ 校验清单的上限**不能按"只列几个文件"来设**（2026-10-19 实测踩到）：
+#    我们的清单是拿**整个包**（约 1940 个文件）算的，实际 **224.8 KB**；
+#    原来上限写 32 KiB → 程序把自己的清单判成"大小无效"→ **检查更新永远认不出资产**。
+#    现在按 1 MiB 设（留足余量），同时限制到 1 MiB 也够挡住恶意大文件。
+CHECKSUM_MAX_BYTES = 1024 * 1024
 
 _VERSION_RE = re.compile(
     r"^(?:v|V)?"
@@ -188,7 +193,7 @@ def select_assets(
         return None, None, "SHA256 校验清单缺失或重名"
     if not _valid_asset(zip_matches[0], zip_name, max_size):
         return None, None, "更新包大小、状态或下载地址无效"
-    if not _valid_asset(sums_matches[0], CHECKSUM_ASSET_NAME, 32 * 1024):
+    if not _valid_asset(sums_matches[0], CHECKSUM_ASSET_NAME, CHECKSUM_MAX_BYTES):
         return None, None, "校验清单大小、状态或下载地址无效"
 
     return zip_matches[0], sums_matches[0], ""
@@ -220,7 +225,7 @@ def _filename_valid(filename):
     )
 
 
-def parse_checksum_list(text, limit=32 * 1024) -> dict:
+def parse_checksum_list(text, limit=CHECKSUM_MAX_BYTES) -> dict:
     """
     解析 UTF-8 文本的 GNU 校验清单。
 

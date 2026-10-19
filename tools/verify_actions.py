@@ -209,6 +209,7 @@ def main():
     #    于是这份隔离副本会去写**用户真实的数据目录**（自检碰真数据是红线）。
     env = dict(os.environ)
     env["RESUME_TRACKER_DATA_DIR"] = os.path.join(scratch, "data")
+    env["RESUME_TRACKER_NO_SHELL"] = "1"   # 自检不许真开资源管理器（2026-10-19）
     server = subprocess.Popen([PYTHON, "server.py"], cwd=copy, env=env,
                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:

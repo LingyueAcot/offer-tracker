@@ -89,7 +89,13 @@ def main():
           repr(R.parse_checksum_list(star)))
     bad = "这不是一行合法的校验行\n" + good
     check("含坏行：整份拒绝（返回空）", R.parse_checksum_list(bad) == {}, repr(R.parse_checksum_list(bad)))
-    check("超限：整份拒绝", R.parse_checksum_list("a" * 64 + "  x.zip\n" * 5000) == {})
+    # 2026-10-19 改：上限默认值从 32 KiB 提到 1 MiB（我们的真实清单就是 224.8 KB），
+    # 所以"超限"这条**必须显式传一个小 limit**，否则它什么都不测（原来那版会变成假绿）。
+    check("超限（显式 limit=1024）：整份拒绝", R.parse_checksum_list(good * 50, limit=1024) == {})
+    # ★ 回归：**真实大小的清单（224.8 KB）必须能解析**——这正是今天那头 bug 的来源
+    big = "".join("%s  f%05d.bin\n" % ("a" * 64, i) for i in range(3200))   # ≈ 224 KB
+    check("真实大小清单（约 224 KB）能解析（回归：上限曾被设成 32 KiB）",
+          len(R.parse_checksum_list(big)) == 3200, "%d 字节 → %d 条" % (len(big), len(R.parse_checksum_list(big))))
     check('checksum_for 大小写不同 → ""',
           R.checksum_for({"A.ZIP": "a" * 64}, "a.zip") in ("", "a" * 64))
 

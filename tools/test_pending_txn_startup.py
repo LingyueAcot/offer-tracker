@@ -70,6 +70,7 @@ def write_txn(pkg, **fields):
 def run_server(pkg, data_dir, extra_env=None):
     env = dict(os.environ)
     env["RESUME_TRACKER_DATA_DIR"] = data_dir
+    env["RESUME_TRACKER_NO_SHELL"] = "1"   # 自检不许真开资源管理器（2026-10-19）
     env["PYTHONIOENCODING"] = "utf-8"
     if extra_env:
         env.update(extra_env)

@@ -220,7 +220,7 @@ HOST = "127.0.0.1"
 #   新增功能 / 界面变化          -> 第二位 +1（1.0 -> 1.1）
 #   动了数据库结构 / 界面大改    -> 第一位 +1（1.x -> 2.0），且此时要提醒用户：
 #                                  升级包能原地升，是因为 schema.py 会在启动时给老库补字段。
-APP_VERSION = "1.1.10"
+APP_VERSION = "1.1.11"
 # ⚠️ 这个跟 APP_VERSION 是两回事，别一起改：
 #   APP_VERSION   = 给人和界面看的版本名（"1.1"），纯字符串，随便改。
 #   SCHEMA_VERSION = **数据库结构的版本号**（整数）。只有 schema.py 真的改了表结构
@@ -1795,12 +1795,20 @@ def open_logs_folder():
     为什么用 Popen 而不是 subprocess.run：`explorer` 会立刻返回，但等它退出没必要；
     而且 `CREATE_NO_WINDOW` 是必须的 —— 否则会闪一个黑框（这个项目为"黑窗口"
     已经踩过好几次了，见 `AGENTS.md`）。
+
+    ⚠️ **自检环境不许真开窗口**（2026-10-19 加）：接口门/路由门会真的调这个接口，
+    于是每次跑自检都在桌面上弹出一个「临时副本的 logs 目录」，而且没人关它
+    （用户实测：攒一堆）。约定：**只要设了 `RESUME_TRACKER_NO_SHELL=1`**（自检脚本会设），
+    就只做目录/轮转检查、不调 `explorer`，返回 True（接口行为不变，只是不弹窗）。
     """
     try:
         if not os.path.isdir(LOG_DIR):
             os.makedirs(LOG_DIR)
         if app_paths.rotation_enabled():
             app_paths.rotate_log(os.path.join(LOG_DIR, "server.log"))
+        if os.environ.get("RESUME_TRACKER_NO_SHELL") == "1":
+            diagnostics_service.log_exception("自检环境：跳过打开资源管理器（RESUME_TRACKER_NO_SHELL=1）")
+            return True
         flags = 0
         if hasattr(subprocess, "CREATE_NO_WINDOW"):
             flags = subprocess.CREATE_NO_WINDOW

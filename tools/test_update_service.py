@@ -149,7 +149,7 @@ def fixture():
         f = Fixture(base)
         S.release_lock()
         S._storage_dir = None
-        stack.enter_context(patch.dict(os.environ, {"RESUME_TRACKER_DATA_DIR": f.data,
+        stack.enter_context(patch.dict(os.environ, {"RESUME_TRACKER_DATA_DIR": f.data, "RESUME_TRACKER_NO_SHELL": "1",
                                                     "LOCALAPPDATA": f.local}))
         stack.enter_context(patch.object(paths, "program_dir", return_value=f.program))
         stack.enter_context(patch.object(paths, "cache_dir", return_value=f.cache))

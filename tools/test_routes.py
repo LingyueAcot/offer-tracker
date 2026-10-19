@@ -132,6 +132,7 @@ with open(os.path.join(tmp, "config.json"), "w", encoding="utf-8") as handle:
 #    "隔壁已有库→原地，否则→%LOCALAPPDATA%" —— 不设这个变量，这份副本会被当成"新装"，
 #    于是自检会往**用户真实的数据目录**里建库写数据（这正是"自检绝不许碰真数据"要防的事）。
 os.environ["RESUME_TRACKER_DATA_DIR"] = os.path.join(scratch, "data")
+os.environ["RESUME_TRACKER_NO_SHELL"] = "1"   # 自检不许真开资源管理器（2026-10-19）
 sys.path.insert(0, tmp)
 import server  # noqa: E402
 
