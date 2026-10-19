@@ -1,0 +1,16 @@
+# 用户数据与运行时产物：永不进版本库
+app/data/
+app/logs/
+app/webview_profile/
+app/browser_profile/
+app/config.json
+app/个人画像.json
+app/startup-log.txt
+__pycache__/
+*.pyc
+*.tmp-*/
+# 打包/升级产物（make_trial_package.py 与升级脚本会生成）
+试用包/
+_before_upgrade_*/
+# 自检的临时试验场（test_data_safety / test_shortcut / test_window_state 会用）
+tools/.scratch/

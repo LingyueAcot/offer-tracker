@@ -1,0 +1,21 @@
+# 应届海投管理 v3 —— 依赖说明
+#
+# 【必需依赖】pywebview
+#   v3 的窗口外壳换成了 pywebview + WebView2（用它自己建窗口，不再是 Edge 的 --app 模式）。
+#   装一次就够：   pip install pywebview
+#   要装进 Python 3.12（这台电脑实际运行的版本），不要装到 Anaconda 3.7 里去。
+#
+#   注意：这一条是 v3 才有的。2.0 的启动器是零第三方依赖；v3 多出 pywebview 这一项。
+#
+# 【后端仍然是纯标准库】
+#   server.py 一行没改，还是 http.server + sqlite3，没有引入任何新依赖。
+#
+# 【可选依赖】下面这个只有要用「导入 Excel / 生成导入模板」时才需要：
+#   pip install openpyxl
+#
+# 【其它可选条件】（不是 Python 包）
+#   - WebView2 运行时：Windows 11 自带；Win10 一般随 Edge 一起装上，装了就够用
+#   - Chrome 或 Edge：仅「宣讲会自动同步」需要（要用无界面浏览器渲染网页）
+#   - 联网：仅「宣讲会自动同步」需要；其它功能全部离线可用
+pywebview
+openpyxl
