@@ -1029,6 +1029,7 @@
       <button class="btn ghost" id="update-details" aria-expanded="false" aria-controls="update-panel">查看说明</button>
       <button class="btn ghost" id="update-ignore">忽略</button>
       <button class="btn" id="update-retry" hidden>重试</button>
+      <button class="btn ghost" id="update-dismiss" hidden title="关掉这条提示（下次再点检查更新时才出现）">关闭</button>
       <div class="update-progress" id="update-progress" hidden>
         <progress id="update-meter" max="100" value="0" aria-label="更新下载进度"></progress>
         <span id="update-percent">0%</span>
@@ -4843,13 +4844,22 @@ data/change_log.jsonl  每一次改动（含删除）</pre>
   // ---------------- 内置更新：全部走本地 HTTP ----------------
   var updateStarted = false, updateState = {stage:"idle"}, updateOpen = false;
   var updateBusy = "", updateError = "", updateRetry = "check", updateTimer = null, updateRequestId = 0;
+  // 2026-10-19 加：失败提示必须**能被用户关掉**。之前只有「重试」，而「忽略」在没有版本号时是隐藏的
+  // → 检查一失败就把界面卡住（用户原话「无法关闭」）。另外**自动检查失败要静默**，不打扰。
+  var updateDismissed = false;
   function updateRunning(){
     return /^(checking|downloading|installing)$/.test(updateState.stage);
   }
   function renderUpdate(){
     var stage = updateState.stage, busy = !!updateBusy || updateRunning();
     var available = /^(found|downloading|downloaded|installing)$/.test(stage);
-    $("update-box").hidden = !available && stage !== "failed" && stage !== "checking" && !updateError;
+    // ⚠️ 显示条件（2026-10-19 修）：**自动检查失败不许弹**（后台检查失败只写进状态，按方案要求"静默放过"）；
+    //    但"下载/安装失败"是用户主动发起过的动作，重开界面后仍要能看见。用文案前缀区分（后端两类文案固定以「检查失败」开头）。
+    var lastErr = String(updateState.last_error || "");
+    var checkFailureOnly = !lastErr || lastErr.indexOf("检查失败") === 0;
+    var failedNow = !!updateError || (stage === "failed" && !checkFailureOnly);
+    var show = available || stage === "checking" || failedNow;
+    $("update-box").hidden = !show || updateDismissed;
     $("btn-update").disabled = busy;
     $("btn-update").textContent = stage === "checking" || updateBusy === "check" ? "检查中…" : "检查更新";
     var title = "发现新版本 v" + String(updateState.latest || "").replace(/^v/i, "")
@@ -4862,6 +4872,9 @@ data/change_log.jsonl  每一次改动（含删除）</pre>
     $("update-error").textContent = updateError || updateState.last_error || "更新操作失败，请重试。";
     $("update-retry").hidden = stage !== "failed" && !updateError;
     $("update-retry").disabled = busy;
+    // 失败/报错时永远给一个出口：关掉它（不下载、不忽略版本，只是把这条提示收起来）
+    $("update-dismiss").hidden = !failedNow;
+    $("update-dismiss").disabled = busy;
     $("update-details").hidden = !updateState.latest || stage === "idle" || stage === "checking";
     $("update-details").textContent = updateOpen ? "收起说明" : "查看说明";
     $("update-details").setAttribute("aria-expanded", String(updateOpen));
@@ -4927,6 +4940,7 @@ data/change_log.jsonl  每一次改动（含删除）</pre>
     var id = ++updateRequestId;
     updateBusy = action;
     updateError = "";
+    updateDismissed = false;      // 用户主动点了，就把"收起"状态复位
     if(action !== "ignore") updateRetry = action;
     renderUpdate();
     var body = action === "ignore" ? {version:updateState.latest} : {};
@@ -4959,6 +4973,13 @@ data/change_log.jsonl  每一次改动（含删除）</pre>
   $("update-ignore").onclick = function(){ runUpdate("ignore"); };
   $("update-install").onclick = function(){ runUpdate(updateState.stage === "downloaded" ? "install" : "download"); };
   $("update-retry").onclick = function(){ runUpdate(updateRetry); };
+  // 关掉失败提示：只把这条收起来（不改版本、不动忽略记录），下次点「检查更新」还会正常再查一次。
+  $("update-dismiss").onclick = function(){ updateDismissed = true; updateError = ""; renderUpdate(); $("btn-update").focus(); };
+  document.addEventListener("keydown", function(e){
+    if(e.key === "Escape" && !$("update-box").hidden && !updateBusy && !updateRunning()){
+      updateDismissed = true; updateError = ""; renderUpdate();
+    }
+  });
 
   // 跨午夜以及休眠恢复后，日期相关视图自动重新计算。
   var renderedDay = today();

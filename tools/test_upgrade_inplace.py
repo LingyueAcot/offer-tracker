@@ -27,12 +27,32 @@ import glob
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
 import time
 from unittest import mock
+
+def _app_version():
+    """从 app/server.py 读当前版本号 —— **不许在这里写死**。
+
+    2026-10-19 踩到：测试里硬写 安装=1.1.8 / 升级包=1.1.9，程序升到 1.1.10 之后，
+    "正常升级"被升级器判成**版本倒退**而拒绝，85 项挂了 10 项。
+    所以版本一律从程序源码算：安装＝当前版本，升级包＝主版本不变、第三位 +1。
+    """
+    src = io.open(os.path.join(APP_SRC, "server.py"), encoding="utf-8").read()
+    found = re.search(r'^APP_VERSION\s*=\s*"([^"]+)"', src, re.M)
+    return found.group(1) if found else "0.0.0"
+
+
+def _bump(version):
+    parts = str(version).split(".")
+    while len(parts) < 3:
+        parts.append("0")
+    return "%s.%s.%d" % (parts[0], parts[1], int(parts[2]) + 1)
+
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
@@ -43,6 +63,12 @@ APP_SRC = os.path.join(ROOT, "app")            # 真程序文件（私有仓库�
 UPDATER = os.path.join(HERE, "updater.py")
 sys.path.insert(0, HERE)
 import updater as U                            # noqa: E402  （同一套哈希/清单逻辑，不重写一遍）
+
+# ⚠️ 这三个常量必须放在 **APP_SRC 之后**（_app_version 要读 app/server.py；
+#    放前面会 NameError —— 2026-10-19 第一次挪位置就挪错了）。
+OLD = _app_version()          # 已装版本（= 程序当前版本）
+NEW = _bump(OLD)              # 升级包版本（比它新一位）
+LOWER = "0.0.1"               # 比谁都旧的版本（用来测"版本倒退必须拒绝"）
 
 ok = True
 passed = 0
@@ -60,7 +86,7 @@ def check(label, cond, extra=""):
     return cond
 
 
-def make_mini_package(root, name, files=None, version="1.1.8", extra_removed=(), with_updater=True):
+def make_mini_package(root, name, files=None, version=OLD, extra_removed=(), with_updater=True):
     """造一个"迷你安装"：app\\ + updater\\ + update-manifest.json（不含 runtime，测试不需要）。"""
     pkg = os.path.join(root, name)
     app = os.path.join(pkg, "app")
@@ -549,14 +575,14 @@ def main():
         if args.hardening_only:
             return finish()
         # ---------- 1. 正常升级 ----------
-        print("== 1) 正常升级：1.1.8 → 1.1.9 ==")
-        old = make_mini_package(root, "安装-A", version="1.1.8")
+        print("== 1) 正常升级：%s → %s ==" % (OLD, NEW))
+        old = make_mini_package(root, "安装-A", version=OLD)
         snapshot = put_user_data(old)
         # A 里放一个"下个版本会删掉"的旧文件，专门用来验 removed 清单真生效
         with io.open(os.path.join(old, "app", "旧模块.py"), "w", encoding="utf-8", newline="\n") as h:
             h.write("# 这个模块下一版删掉了\n")
         before_launcher = U.sha256_file(os.path.join(old, "app", "launcher.py"))
-        new = make_mini_package(root, "安装-B", version="1.1.9",
+        new = make_mini_package(root, "安装-B", version=NEW,
                                 files={"app/新功能.py": "# 新版本才有\n",
                                        "app/launcher.py": "# 新版本的启动器\n"},
                                 extra_removed=("app/旧模块.py",))
@@ -578,10 +604,10 @@ def main():
 
         # ---------- 2. 哈希不符 → 回滚 ----------
         print("\n== 2) 注入：包里文件被改坏（哈希不符）→ 必须整体回滚 ==")
-        t2 = make_mini_package(root, "安装-2", version="1.1.8")
+        t2 = make_mini_package(root, "安装-2", version=OLD)
         snap2 = put_user_data(t2)
         before2 = U.sha256_file(os.path.join(t2, "app", "launcher.py"))
-        p2 = make_mini_package(root, "包-2", version="1.1.9", files={"app/launcher.py": "# 新\n"})
+        p2 = make_mini_package(root, "包-2", version=NEW, files={"app/launcher.py": "# 新\n"})
         with io.open(os.path.join(p2, "app", "launcher.py"), "w", encoding="utf-8", newline="\n") as h:
             h.write("# 被人改过，和清单对不上\n")
         code, out = run_updater(t2, p2)
@@ -594,16 +620,16 @@ def main():
 
         # ---------- 3. 半新半旧（模拟断电）→ 先恢复 ----------
         print("\n== 3) 注入：替换到一半断电（半新半旧）→ 再跑必须先恢复 ==")
-        t3 = make_mini_package(root, "安装-3", version="1.1.8")
+        t3 = make_mini_package(root, "安装-3", version=OLD)
         snap3 = put_user_data(t3)
         good_launcher = U.sha256_file(os.path.join(t3, "app", "launcher.py"))
-        payload3 = make_mini_package(root, "包-3", version="1.1.9", files={"app/launcher.py": "# 新\n"})
+        payload3 = make_mini_package(root, "包-3", version=NEW, files={"app/launcher.py": "# 新\n"})
         # 手工造"半新半旧"：把 launcher.py 换成新的，并写一条停在 apply 的事务
         shutil.copyfile(os.path.join(payload3, "app", "launcher.py"),
                         os.path.join(t3, "app", "launcher.py"))
         where = os.path.join(t3, "更新数据")
         os.makedirs(where, exist_ok=True)
-        backup = os.path.join(t3, "_before_update_1.1.9_deadbeef")
+        backup = os.path.join(t3, "_before_update_" + NEW + "_deadbeef")
         os.makedirs(os.path.join(backup, "app"), exist_ok=True)
         # 备份里放"升级前那份"（真实升级时这里放的就是旧文件）
         old_text = "# 老版本启动器（恢复用）\n"
@@ -624,7 +650,7 @@ def main():
 
         # ---------- 4. 备份没完成就断电 → 作废事务、不动文件 ----------
         print("\n== 4) 注入：备份还没完成就断电 → 作废事务、程序文件不动 ==")
-        t4 = make_mini_package(root, "安装-4", version="1.1.8")
+        t4 = make_mini_package(root, "安装-4", version=OLD)
         snap4 = put_user_data(t4)
         before4 = U.sha256_file(os.path.join(t4, "app", "launcher.py"))
         where4 = os.path.join(t4, "更新数据")
@@ -633,7 +659,7 @@ def main():
             "id": "cafe", "phase": "backup", "target": t4, "payload": "",
             "backup": os.path.join(t4, "_before_update_x"), "backup_hashes": {},
             "files": {}, "removed": [], "applied": []})
-        payload4 = make_mini_package(root, "包-4", version="1.1.9")
+        payload4 = make_mini_package(root, "包-4", version=NEW)
         code, out = run_updater(t4, payload4)
         check("备份未完成：事务被作废（输出里有「作废」）", "作废" in out)
         check("备份未完成：用户数据没被动", user_data_unchanged(t4, snap4)[0])
@@ -641,9 +667,9 @@ def main():
 
         # ---------- 5. 清单里出现用户文件 → 拒绝 ----------
         print("\n== 5) 注入：清单里混进用户文件（app\\data\\...）→ 必须拒绝 ==")
-        t5 = make_mini_package(root, "安装-5", version="1.1.8")
+        t5 = make_mini_package(root, "安装-5", version=OLD)
         snap5 = put_user_data(t5)
-        p5 = make_mini_package(root, "包-5", version="1.1.9")
+        p5 = make_mini_package(root, "包-5", version=NEW)
         man = json.load(io.open(os.path.join(p5, "update-manifest.json"), encoding="utf-8"))
         man["files"]["app/data/applications.db"] = "0" * 64
         U.save_json(os.path.join(p5, "update-manifest.json"), man)
@@ -653,7 +679,7 @@ def main():
 
         # ---------- 6. 程序在跑 → 超时中止、不硬杀、不动文件 ----------
         print("\n== 6) 注入：程序目录里的进程正在跑 → 超时中止（不硬杀）==")
-        t6 = make_mini_package(root, "安装-6", version="1.1.8")
+        t6 = make_mini_package(root, "安装-6", version=OLD)
         snap6 = put_user_data(t6)
         before6 = U.sha256_file(os.path.join(t6, "app", "launcher.py"))
         holder = subprocess.Popen([sys.executable, "-c",
@@ -661,7 +687,7 @@ def main():
                                    os.path.join(t6, "app", "launcher.py")],
                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         time.sleep(1.5)
-        payload6 = make_mini_package(root, "包-6", version="1.1.9", files={"app/launcher.py": "# 新\n"})
+        payload6 = make_mini_package(root, "包-6", version=NEW, files={"app/launcher.py": "# 新\n"})
         code, out = run_updater(t6, payload6, wait=4)
         alive = holder.poll() is None
         holder.terminate()
@@ -674,44 +700,44 @@ def main():
 
         # ---------- 7. 并发第二个更新 → 被拒 ----------
         print("\n== 7) 注入：同一安装并发第二次更新 → 第二个必须被拒 ==")
-        t7 = make_mini_package(root, "安装-7", version="1.1.8")
+        t7 = make_mini_package(root, "安装-7", version=OLD)
         put_user_data(t7)
         where7 = os.path.join(t7, "更新数据")
         os.makedirs(where7, exist_ok=True)
         U.save_json(os.path.join(where7, U.LOCK_NAME), {"pid": os.getpid(), "started": "now"})
-        payload7 = make_mini_package(root, "包-7", version="1.1.9")
+        payload7 = make_mini_package(root, "包-7", version=NEW)
         code, out = run_updater(t7, payload7)
         check("并发更新：第二个被拒", code != 0 and "已经有一个更新在进行" in out, "code=%s" % code)
 
         # ---------- 8. 版本倒退 → 拒绝 ----------
         print("\n== 8) 注入：升级包版本更旧 → 拒绝 ==")
-        t8 = make_mini_package(root, "安装-8", version="1.1.8")
+        t8 = make_mini_package(root, "安装-8", version=OLD)
         put_user_data(t8)
-        payload8 = make_mini_package(root, "包-8", version="1.0.0")
+        payload8 = make_mini_package(root, "包-8", version=LOWER)
         code, out = run_updater(t8, payload8)
         check("版本倒退：拒绝", code != 0 and "旧" in out, "code=%s" % code)
 
         # ---------- 9. 删除项：升级删掉、回滚恢复 ----------
         print("\n== 9) 删除清单：升级后文件真的没了 ==")
-        t9 = make_mini_package(root, "安装-9", version="1.1.8")
+        t9 = make_mini_package(root, "安装-9", version=OLD)
         put_user_data(t9)
         victim = os.path.join(t9, "app", "旧模块.py")
         with io.open(victim, "w", encoding="utf-8", newline="\n") as h:
             h.write("# 下一版删掉\n")
         check("删除项：升级前那个文件在", os.path.isfile(victim))
-        payload9 = make_mini_package(root, "包-9", version="1.1.9", extra_removed=("app/旧模块.py",))
+        payload9 = make_mini_package(root, "包-9", version=NEW, extra_removed=("app/旧模块.py",))
         code, out = run_updater(t9, payload9)
         check("删除项：升级后被删掉", code == 0 and not os.path.isfile(victim))
 
         # ---------- 10. 用户改过文件 → 覆盖；失败时能回到"用户那份" ----------
         print("\n== 10) 用户本地改过程序文件：覆盖后若失败，回滚回「用户那份」 ==")
-        t10 = make_mini_package(root, "安装-10", version="1.1.8")
+        t10 = make_mini_package(root, "安装-10", version=OLD)
         put_user_data(t10)
         user_edit = "# 用户自己改过的启动器\n"
         with io.open(os.path.join(t10, "app", "launcher.py"), "w", encoding="utf-8", newline="\n") as h:
             h.write(user_edit)
         snap10 = put_user_data(t10)
-        p10 = make_mini_package(root, "包-10", version="1.1.9", files={"app/launcher.py": "# 新\n"})
+        p10 = make_mini_package(root, "包-10", version=NEW, files={"app/launcher.py": "# 新\n"})
         with io.open(os.path.join(p10, "app", "server.py"), "w", encoding="utf-8", newline="\n") as h:
             h.write("# 与清单不符\n")          # 让复核失败 → 触发回滚
         code, out = run_updater(t10, p10)

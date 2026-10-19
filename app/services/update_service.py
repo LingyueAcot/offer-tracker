@@ -223,9 +223,18 @@ def _check_locked(manual):
     result = github.fetch_latest(config["version"], etag=state.get("etag"))
     if not result.get("ok"):
         limited = result.get("rate_limited")
-        return _failure("检查失败：服务暂时限流，请稍后重试。" if limited else
-                        "检查失败：无法获取版本信息，请检查网络后重试。",
-                        429 if limited else 502, True, result.get("retry_after"))
+        # ⚠️ 文案要**说准原因**（2026-10-19 用户被误导过）：仓库是私有时，未带 token 的请求
+        #    GitHub 直接回 404 —— 这不是"网络不好"，弹一句"请检查网络"会让人一直白折腾。
+        status = result.get("status") or 0
+        if limited:
+            reason = "检查失败：请求被限流，请过一会儿再试。"
+        elif status == 404:
+            reason = "检查失败：查不到发布信息（仓库可能尚未公开，或还没有发布版本）。"
+        elif status in (401, 403):
+            reason = "检查失败：没有权限读取发布信息（仓库可能是私有的）。"
+        else:
+            reason = "检查失败：无法获取版本信息，请检查网络后重试。"
+        return _failure(reason, 429 if limited else 502, True, result.get("retry_after"))
     release = result.get("release")
     if result.get("not_modified"):
         latest = _version(state.get("known_version") or "")
